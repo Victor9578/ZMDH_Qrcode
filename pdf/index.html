@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>预览 - SN202600118W</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #525659;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <iframe id="pdf-frame" src=""></iframe>
+
+    <script>
+        // 支持两种传参方式：
+        // 1. ?name=SN202600118W 
+        // 2. #SN202600118W
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let pdfName = urlParams.get('name');
+
+        if (!pdfName && window.location.hash) {
+            pdfName = window.location.hash.substring(1);
+        }
+
+        if (pdfName) {
+            // 自动补全后缀，为了兼容你只传 "SN202600118W" 的情况
+            if (!pdfName.toLowerCase().endsWith('.pdf')) {
+                pdfName += '.pdf';
+            }
+            // 更新标题
+            document.title = '预览 - ' + pdfName.replace('.pdf', '');
+
+            // 组装最终真实访问的路径并加载
+            const iframe = document.getElementById('pdf-frame');
+            iframe.src = '/static/pdfjs/web/viewer.html?file=/pdf/' + encodeURIComponent(pdfName);
+        } else {
+            document.body.innerHTML = '<h2 style="color:white;text-align:center;margin-top:20%;font-family:sans-serif;">请在 URL 后方添加文件参数<br><br>例如：http://127.0.0.1:8000/pdf/?name=SN202600118W<br>或者：http://127.0.0.1:8000/pdf/#SN202600118W</h2>';
+        }
+    </script>
+</body>
+
+</html>
