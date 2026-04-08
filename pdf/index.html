@@ -36,7 +36,8 @@
         let pdfName = urlParams.get('name');
 
         if (!pdfName && window.location.hash) {
-            pdfName = window.location.hash.substring(1);
+            // 需要调用 decodeURIComponent 来解密 hash 中的中文编码，否则会导致双重编码出错（比如 % 变成 %25）
+            pdfName = decodeURIComponent(window.location.hash.substring(1));
         }
 
         if (pdfName) {
