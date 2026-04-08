@@ -5,8 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>云端直供台 | PDF Admin</title>
-    <!-- 已将 CDN 替换为你本地的 js，彻底解决网络报错 -->
-    <script src="static/js/qrcode.min.js"></script>
+    <script src="pdf/js/qrcode.min.js"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -69,6 +68,7 @@
         }
 
         input[type="password"],
+        input[type="text"],
         input[type="file"] {
             width: 100%;
             padding: 12px;
@@ -82,7 +82,8 @@
             transition: border-color 0.2s;
         }
 
-        input[type="password"]:focus {
+        input[type="password"]:focus,
+        input[type="text"]:focus {
             border-color: var(--accent);
         }
 
@@ -170,9 +171,22 @@
             border: 1px solid var(--danger);
         }
 
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
+        .step-hidden {
+            display: none;
+        }
+
+        .divider {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 25px 0;
+        }
+
+        .step-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
     </style>
 </head>
@@ -183,33 +197,52 @@
         <h1>直链分发中心</h1>
         <p class="subtitle">无服务器架构自动汇编</p>
 
+        <!-- Token 区域 -->
         <div class="form-group">
             <label for="gh-token">GitHub Token (PAT)</label>
             <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
             <span class="token-help">安全策略：仅保存在您的浏览器本地缓存中。</span>
         </div>
 
-        <div class="form-group">
-            <label for="pdf-file">挑选 PDF 文件</label>
-            <input type="file" id="pdf-file" accept="application/pdf">
+        <hr class="divider">
+
+        <!-- 步骤一：输入编号，生成二维码 -->
+        <div id="step1">
+            <div class="step-label">步骤一：生成二维码</div>
+            <div class="form-group">
+                <label for="file-number">文件编号</label>
+                <input type="text" id="file-number" placeholder="例如：SN202600118W">
+            </div>
+            <button id="qr-btn" onclick="generateQR()">📎 生成二维码</button>
         </div>
 
-        <button id="upload-btn" onclick="startUpload()">⚡ 一键上传并生成</button>
-
-        <div id="status"></div>
-
+        <!-- 二维码显示区 -->
         <div id="qr-container">
-            <!-- QR Code renders here -->
             <canvas id="qr-canvas"></canvas>
             <div style="color: #333; font-weight: 600; margin-bottom: 5px;">扫码查看或分享此链接：</div>
             <a id="qr-url" class="qr-link" target="_blank" href=""></a>
         </div>
+
+        <!-- 步骤二：上传 PDF（步骤一完成后才显示） -->
+        <div id="step2" class="step-hidden">
+            <hr class="divider">
+            <div class="step-label">步骤二：上传 PDF 文件</div>
+            <div class="form-group">
+                <label for="pdf-file">选择 PDF（文件将自动重命名为 <strong id="target-name-hint"></strong>）</label>
+                <input type="file" id="pdf-file" accept="application/pdf">
+            </div>
+            <button id="upload-btn" onclick="startUpload()">🚀 上传到仓库</button>
+        </div>
+
+        <div id="status"></div>
     </div>
 
     <script>
         const REPO_OWNER = 'Victor9578';
         const REPO_NAME = 'ZMDH_Qrcode';
         const BASE_URL = 'https://zmdh.jaywxl.eu.org/pdf/#';
+
+        let currentFileNumber = '';
 
         // 初始化：从 localStorage 加载 Token
         document.addEventListener("DOMContentLoaded", () => {
@@ -226,6 +259,53 @@
             el.innerText = msg;
         }
 
+        function hideStatus() {
+            document.getElementById('status').style.display = 'none';
+        }
+
+        // ========== 步骤一：生成二维码 ==========
+        function generateQR() {
+            const fileNumber = document.getElementById('file-number').value.trim();
+            if (!fileNumber) return showStatus("❌ 请输入文件编号", "error");
+
+            hideStatus();
+            currentFileNumber = fileNumber;
+
+            const finalUrl = BASE_URL + encodeURIComponent(fileNumber);
+
+            // 渲染二维码：黑白、version 7、高容错
+            const canvas = document.getElementById('qr-canvas');
+            QRCode.toCanvas(canvas, finalUrl, {
+                version: 7,
+                errorCorrectionLevel: 'H',
+                width: 300,
+                margin: 2,
+                color: {
+                    dark: "#000000",
+                    light: "#ffffff"
+                }
+            }, function (error) {
+                if (error) {
+                    console.error(error);
+                    return showStatus("❌ 二维码生成失败: " + error.message, "error");
+                }
+            });
+
+            // 显示链接
+            const linkEl = document.getElementById('qr-url');
+            linkEl.href = finalUrl;
+            linkEl.innerText = finalUrl;
+
+            // 显示二维码区域
+            document.getElementById('qr-container').style.display = 'block';
+
+            // 显示步骤二，并在标签上告知目标文件名
+            const targetName = fileNumber + '.pdf';
+            document.getElementById('target-name-hint').innerText = targetName;
+            document.getElementById('step2').classList.remove('step-hidden');
+        }
+
+        // ========== 步骤二：上传文件（重命名为编号） ==========
         async function startUpload() {
             const tokenInput = document.getElementById('gh-token').value.trim();
             const fileInput = document.getElementById('pdf-file').files[0];
@@ -233,22 +313,18 @@
 
             if (!tokenInput) return showStatus("❌ 请输入 GitHub Token", "error");
             if (!fileInput) return showStatus("❌ 请先选择一个 PDF 文件", "error");
+            if (!currentFileNumber) return showStatus("❌ 请先完成步骤一", "error");
 
             // 记住 Token
             localStorage.setItem('gh_token', tokenInput);
 
-            const filename = fileInput.name;
-            // 保护：仅限 PDF
-            if (!filename.toLowerCase().endsWith('.pdf')) {
-                return showStatus("❌ 必须上传 PDF 后缀的文件！", "error");
-            }
-
-            const exactName = encodeURIComponent(filename);
-            const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/pdf/${exactName}`;
+            // 不管原始文件名是啥，目标名称强制使用编号
+            const targetFilename = currentFileNumber + '.pdf';
+            const encodedName = encodeURIComponent(targetFilename);
+            const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/pdf/${encodedName}`;
 
             btn.innerText = "⏳ 正在分析文件...";
             btn.disabled = true;
-            document.getElementById('qr-container').style.display = 'none';
             showStatus('正在准备上传，请不要关闭网页...', 'success');
 
             try {
@@ -257,13 +333,12 @@
                     const reader = new FileReader();
                     reader.readAsDataURL(fileInput);
                     reader.onload = () => {
-                        // split 移除前缀 data:application/pdf;base64,
                         resolve(reader.result.split(',')[1]);
                     };
                     reader.onerror = error => reject(error);
                 });
 
-                // 2. 为了支持“覆盖上传”，我们需要先查一下该文件是否已经存在
+                // 2. 检查远端是否已存在同名文件（支持覆盖更新）
                 btn.innerText = "⏳ 正在校验远端...";
                 let fileSha = null;
                 const checkRes = await fetch(apiUrl, {
@@ -271,17 +346,17 @@
                 });
                 if (checkRes.ok) {
                     const checkData = await checkRes.json();
-                    fileSha = checkData.sha; // 获取已存在文件的 SHA 指纹
+                    fileSha = checkData.sha;
                 }
 
-                // 3. 执行 PUT 上传
-                btn.innerText = "🚀 正在穿透上传中...";
+                // 3. 执行 PUT 上传（文件名为编号.pdf）
+                btn.innerText = "🚀 正在上传中...";
                 const putBody = {
-                    message: `Auto-Upload: ${filename}`,
+                    message: `Upload: ${targetFilename}`,
                     content: base64Content,
-                    branch: 'master' // 明确指定提交到 master 分支
+                    branch: 'master'
                 };
-                if (fileSha) putBody.sha = fileSha; // 如果存在同名文件，提供 SHA 用于覆盖更新
+                if (fileSha) putBody.sha = fileSha;
 
                 const uploadRes = await fetch(apiUrl, {
                     method: 'PUT',
@@ -297,38 +372,13 @@
                     throw new Error(errData.message || '上传异常');
                 }
 
-                // ================= 成功！=================
-                showStatus(`✅ 上传成功！CF Pages 正在打包，约 1 分钟后即可访问。`, 'success');
-
-                // 生成目标链接
-                const baseName = filename.replace(/\.pdf$/i, '');
-                const finalUrl = BASE_URL + encodeURIComponent(baseName);
-
-                // 渲染二维码
-                const canvas = document.getElementById('qr-canvas');
-                QRCode.toCanvas(canvas, finalUrl, {
-                    width: 250,
-                    margin: 2,
-                    color: {
-                        dark: "#000000",
-                        light: "#ffffff"
-                    }
-                }, function (error) {
-                    if (error) console.error(error);
-                });
-
-                // 补充下方文本链接
-                const linkEl = document.getElementById('qr-url');
-                linkEl.href = finalUrl;
-                linkEl.innerText = finalUrl;
-
-                document.getElementById('qr-container').style.display = 'block';
+                showStatus(`✅ 上传成功！文件已保存为 ${targetFilename}，CF Pages 约 1 分钟后生效。`, 'success');
 
             } catch (err) {
                 console.error(err);
                 showStatus(`❌ 失败: ${err.message}`, 'error');
             } finally {
-                btn.innerText = "⚡ 一键上传并生成";
+                btn.innerText = "🚀 上传到仓库";
                 btn.disabled = false;
             }
         }

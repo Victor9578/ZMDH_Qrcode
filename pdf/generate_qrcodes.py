@@ -1,8 +1,8 @@
 import os
 import qrcode
 
-# 配置
-PDF_DIR = "pdf"
+# 配置（脚本已移至 pdf/ 目录内，所以扫描当前目录）
+PDF_DIR = "."
 QR_DIR = os.path.join(PDF_DIR, "qr_images")
 BASE_URL = "https://zmdh.jaywxl.eu.org/pdf/#"
 
