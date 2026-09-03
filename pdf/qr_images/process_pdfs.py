@@ -4,8 +4,8 @@
 
 流程：
   1. 扫描本目录（pdf/qr_images/）下的所有源 PDF
-  2. 按编号生成对应二维码 PNG（缓存在 qr_pngs/ 子目录，已存在则跳过）
-  3. 用二维码替换 PDF 中的原二维码，直接修改源文件
+  2. 按编号生成对应二维码 PNG（带透明底，缓存在 qr_pngs/ 子目录）
+  3. 用二维码替换 PDF 中的原二维码（位置附近自动吸色画背景），直接修改源文件
   4. 把修改后的源文件复制到上级 pdf/ 目录，命名保持为 编号.pdf
 
 直接运行即可：python process_pdfs.py
@@ -17,6 +17,7 @@ import shutil
 
 import fitz  # PyMuPDF
 import qrcode
+from PIL import Image
 
 # ---------------- 配置 ----------------
 
@@ -26,6 +27,8 @@ SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.normpath(os.path.join(SOURCE_DIR, ".."))
 # 二维码 PNG 缓存目录
 QR_DIR = os.path.join(SOURCE_DIR, "qr_pngs")
+# 已处理完成品（带二维码）的存放目录，供下次运行快速识别、避免重复替换
+DONE_DIR = os.path.join(SOURCE_DIR, "done")
 
 BASE_URL = "https://zmdh.jaywxl.eu.org/pdf/#"
 
@@ -43,7 +46,7 @@ TEMPLATE_BY_PREFIX = {
 }
 # 未匹配到前缀时使用的默认模板（默认按 SN 处理）
 DEFAULT_TEMPLATE = TEMPLATE_BY_PREFIX["SN"]
-
+# 源文件已处理过也重新替换；False: 已处理过的源文件直接跳过
 # True: 即使 pdf/ 下已有同名成品也重新生成；False: 跳过已存在的成品
 FORCE_OVERWRITE = False
 
@@ -51,13 +54,26 @@ FORCE_OVERWRITE = False
 # ---------------- 二维码生成 ----------------
 
 
+def make_qr_transparent(qr_filepath):
+    """把二维码 PNG 的白色底改成透明，露出 PDF 上吸色画出的背景矩形。"""
+    im = Image.open(qr_filepath).convert("RGB")
+    # 亮度高的像素（白底/白边）设为透明，黑色码点保持不透明
+    alpha = im.convert("L").point(lambda v: 0 if v >= 200 else 255)
+    im = im.convert("RGBA")
+    im.putalpha(alpha)
+    im.save(qr_filepath)
+
+
 def get_or_make_qr(base_name):
-    """返回二维码 PNG 路径，不存在则生成。"""
+    """返回带透明底的二维码 PNG 路径，不存在（或是不带透明的旧缓存）则生成。"""
     if not os.path.exists(QR_DIR):
         os.makedirs(QR_DIR)
     qr_filepath = os.path.join(QR_DIR, f"{base_name}.png")
     if os.path.exists(qr_filepath):
-        return qr_filepath
+        with Image.open(qr_filepath) as check:
+            if check.mode == "RGBA":
+                return qr_filepath
+            print(f"   旧缓存无透明底，重新生成: {base_name}.png")
 
     url = f"{BASE_URL}{base_name}"
     print(f"   生成二维码: {base_name}.png  (链接: {url})")
@@ -71,6 +87,7 @@ def get_or_make_qr(base_name):
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
     img.save(qr_filepath)
+    make_qr_transparent(qr_filepath)
     return qr_filepath
 
 
@@ -79,11 +96,14 @@ def get_or_make_qr(base_name):
 
 def process_pdf(pdf_path, png_path, template):
     """在 PDF 中用新二维码覆盖原二维码：直接修改源文件，再复制到 pdf/ 目录。"""
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0].strip()
+    filename = os.path.basename(pdf_path)
+    base_name = os.path.splitext(filename)[0].strip()
     output_path = os.path.join(OUTPUT_DIR, f"{base_name}.pdf")
+    done_path = os.path.join(DONE_DIR, filename)
 
-    if not FORCE_OVERWRITE and os.path.exists(output_path):
-        print(f"-> 跳过（成品已存在）: {base_name}.pdf")
+    # 已处理过的源文件会被移入 done/；若同名成品已存在则视为已处理，跳过
+    if not FORCE_OVERWRITE and os.path.exists(done_path):
+        print(f"-> 跳过（已处理过）: {filename}")
         return
 
     doc = fitz.open(pdf_path)
@@ -116,15 +136,17 @@ def process_pdf(pdf_path, png_path, template):
         page.insert_image(rect, filename=png_path)
 
     # 先写到临时文件，再覆盖源文件（PyMuPDF 不能原地保存正在打开的文件），
-    # 最后复制到 pdf/ 目录作为成品
+    # 然后把修改后的源文件复制到 pdf/ 作为成品，并移入 done/ 防止下次重复替换
     tmp_path = pdf_path + ".tmp.pdf"
     doc.save(tmp_path, garbage=3, deflate=True)
     doc.close()
     os.replace(tmp_path, pdf_path)
     shutil.copy2(pdf_path, output_path)
+    if not os.path.exists(DONE_DIR):
+        os.makedirs(DONE_DIR)
+    shutil.move(pdf_path, done_path)
     print(
-        f"-> 完成: {os.path.basename(pdf_path)} "
-        f"(坐标 {target_x},{target_y}, 尺寸 {size}) => 已修改源文件并复制到 pdf/{base_name}.pdf"
+        f"-> 完成: {filename} " f"(坐标 {target_x},{target_y}, 尺寸 {size}) => 源文件已修改并复制到 pdf/{base_name}.pdf"
     )
 
 
@@ -156,7 +178,7 @@ def main():
             print(f"!! 文件 {filename} 处理失败: {e}")
 
     print("-" * 40)
-    print(f"处理完毕，共 {count} 个文件。成品在 pdf/ 目录下，命名为 编号.pdf。")
+    print(f"处理完毕，共 {count} 个文件。修改后的源文件在 done/ 目录，成品在 pdf/ 目录。")
 
 
 if __name__ == "__main__":
