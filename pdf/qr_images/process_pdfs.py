@@ -14,6 +14,7 @@
 import os
 import re
 import shutil
+import stat
 
 import fitz  # PyMuPDF
 import qrcode
@@ -106,6 +107,11 @@ def process_pdf(pdf_path, png_path, template):
         print(f"-> 跳过（已处理过）: {filename}")
         return
 
+    # 源文件带只读属性时，覆盖会报 [WinError 5] 拒绝访问，先清除只读标记
+    if os.stat(pdf_path).st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+        os.chmod(pdf_path, stat.S_IWRITE)
+        print(f"   已清除只读属性: {filename}")
+
     doc = fitz.open(pdf_path)
     pages = doc if template["all_pages"] else [doc[0]]
 
@@ -140,7 +146,11 @@ def process_pdf(pdf_path, png_path, template):
     tmp_path = pdf_path + ".tmp.pdf"
     doc.save(tmp_path, garbage=3, deflate=True)
     doc.close()
-    os.replace(tmp_path, pdf_path)
+    try:
+        os.replace(tmp_path, pdf_path)
+    except PermissionError:
+        os.remove(tmp_path)
+        raise RuntimeError(f"无法覆盖源文件（可能被 PDF 阅读器打开，或带只读属性）: {filename}") from None
     shutil.copy2(pdf_path, output_path)
     if not os.path.exists(DONE_DIR):
         os.makedirs(DONE_DIR)
@@ -161,6 +171,14 @@ def main():
 
     count = 0
     for filename in sorted(os.listdir(SOURCE_DIR)):
+        # 清理上次因文件被占用而失败残留的临时文件
+        if filename.lower().endswith(".tmp.pdf"):
+            try:
+                os.remove(os.path.join(SOURCE_DIR, filename))
+                print(f"已清理残留临时文件: {filename}")
+            except OSError:
+                pass
+            continue
         if not filename.lower().endswith(".pdf"):
             continue
         pdf_path = os.path.join(SOURCE_DIR, filename)
